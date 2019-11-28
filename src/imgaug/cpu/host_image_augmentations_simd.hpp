@@ -237,43 +237,47 @@ RppStatus brightness_host(Rpp8u* srcPtr, RppiSize srcSize, Rpp8u* dstPtr,
                           Rpp32f alpha, Rpp32f beta,
                           RppiChnFormat chnFormat, Rpp32u channel)
 {
-    Rpp8u *srcPtrTemp, *dstPtrTemp;
-    srcPtrTemp = srcPtr;
-    dstPtrTemp = dstPtr;
     int length = (channel * srcSize.height * srcSize.width);
     int alignedlength = length & ~15;
-    __m128i const zero = _mm_setzero_si128();
-    __m128 pMul = _mm_set1_ps(alpha), pAdd = _mm_set1_ps(beta);
-    __m128 p0, p1, p2, p3;
-    __m128i px0, px1, px2, px3;
-    int i = 0;
-    for (; i < alignedlength; i+=16)
+    const int THREADS = 32;
+#pragma omp parallel for
+    for(int j = 0; j < THREADS; j++)
     {
-        px0 =  _mm_loadu_si128((__m128i *)srcPtrTemp); // todo: check if we can use _mm_load_si128 instead (aligned)
-        px1 = _mm_unpackhi_epi8(px0, zero);    // pixels 8-15
-        px0 = _mm_unpacklo_epi8(px0, zero);    // pixels 0-7
-        p2 = _mm_cvtepi32_ps(_mm_unpackhi_epi16(px0, zero));   // pixels 4-7
-        p0 = _mm_cvtepi32_ps(_mm_unpacklo_epi16(px0, zero));  // pixels 0-3
-        p3 = _mm_cvtepi32_ps(_mm_unpackhi_epi16(px1, zero));   // pixels 12-15
-        p1 = _mm_cvtepi32_ps(_mm_unpacklo_epi16(px1, zero));  // pixels 8-11
-        p0 = _mm_mul_ps(p0, pMul);
-        p2 = _mm_mul_ps(p2, pMul);
-        p1 = _mm_mul_ps(p1, pMul);
-        p3 = _mm_mul_ps(p3, pMul);
-        px0 = _mm_cvtps_epi32(_mm_add_ps(p0, pAdd));
-        px2 = _mm_cvtps_epi32(_mm_add_ps(p2, pAdd));
-        px1 = _mm_cvtps_epi32(_mm_add_ps(p1, pAdd));
-        px3 = _mm_cvtps_epi32(_mm_add_ps(p3, pAdd));
-        px0 = _mm_packus_epi32(px0, px2);
-        px1 = _mm_packus_epi32(px1, px3);
-        px0 = _mm_packus_epi16(px0, px1);       // pix 0-15
-        _mm_storeu_si128((__m128i *)dstPtrTemp, px0);      // todo: check if we can use _mm_store_si128 instead (aligned)
-        srcPtrTemp +=16, dstPtrTemp +=16;
+        Rpp8u *srcPtrTemp, *dstPtrTemp;
+        srcPtrTemp = srcPtr + j*(alignedlength/THREADS);
+        dstPtrTemp = dstPtr + j*(alignedlength/THREADS);
+        __m128i const zero = _mm_setzero_si128();
+        __m128 pMul = _mm_set1_ps(alpha), pAdd = _mm_set1_ps(beta);
+        __m128 p0, p1, p2, p3;
+        __m128i px0, px1, px2, px3;
+        for (int i = 0; i < alignedlength/THREADS; i+=16)
+        {
+            px0 =  _mm_loadu_si128((__m128i *)srcPtrTemp); // todo: check if we can use _mm_load_si128 instead (aligned)
+            px1 = _mm_unpackhi_epi8(px0, zero);    // pixels 8-15
+            px0 = _mm_unpacklo_epi8(px0, zero);    // pixels 0-7
+            p2 = _mm_cvtepi32_ps(_mm_unpackhi_epi16(px0, zero));   // pixels 4-7
+            p0 = _mm_cvtepi32_ps(_mm_unpacklo_epi16(px0, zero));  // pixels 0-3
+            p3 = _mm_cvtepi32_ps(_mm_unpackhi_epi16(px1, zero));   // pixels 12-15
+            p1 = _mm_cvtepi32_ps(_mm_unpacklo_epi16(px1, zero));  // pixels 8-11
+            p0 = _mm_mul_ps(p0, pMul);
+            p2 = _mm_mul_ps(p2, pMul);
+            p1 = _mm_mul_ps(p1, pMul);
+            p3 = _mm_mul_ps(p3, pMul);
+            px0 = _mm_cvtps_epi32(_mm_add_ps(p0, pAdd));
+            px2 = _mm_cvtps_epi32(_mm_add_ps(p2, pAdd));
+            px1 = _mm_cvtps_epi32(_mm_add_ps(p1, pAdd));
+            px3 = _mm_cvtps_epi32(_mm_add_ps(p3, pAdd));
+            px0 = _mm_packus_epi32(px0, px2);
+            px1 = _mm_packus_epi32(px1, px3);
+            px0 = _mm_packus_epi16(px0, px1);       // pix 0-15
+            _mm_storeu_si128((__m128i *)dstPtrTemp, px0);      // todo: check if we can use _mm_store_si128 instead (aligned)
+            srcPtrTemp +=16, dstPtrTemp +=16;
+        }
     }
-    for (; i < length; i++) {
-        Rpp32f pixel = ((Rpp32f) (*srcPtrTemp++)) * alpha + beta;
+    for (int i =  alignedlength*32; i < length; i++) {
+        Rpp32f pixel = ((Rpp32f) (srcPtr[i])) * alpha + beta;
         pixel = RPPPIXELCHECK(pixel);
-        *dstPtrTemp++ = (Rpp8u) round(pixel);
+        dstPtr[i] = (Rpp8u) round(pixel);
     }
     return RPP_SUCCESS;
 
@@ -349,49 +353,54 @@ RppStatus exposure_host(Rpp8u* srcPtr, RppiSize srcSize, Rpp8u* dstPtr,
                     Rpp32f exposureFactor,
                     RppiChnFormat chnFormat, Rpp32u channel)
 {
-    Rpp8u *srcPtrTemp, *dstPtrTemp;
-    srcPtrTemp = srcPtr;
-    dstPtrTemp = dstPtr;
-    Rpp32f pixel;
-    Rpp32f exposure_mul = pow(2,exposureFactor);
-
 #if __AVX2__
+
+    const int THREADS = 32;
     int length = (channel * srcSize.height * srcSize.width);
     int alignedlength = length & ~31;
-    __m256 pMul1 = _mm256_set1_ps(exposure_mul);
-    __m256i const zero = _mm256_setzero_si256();
-    __m256i px0, px1, px2, px3;
-    __m256 p0, p1, p2, p3;
-    int i = 0;
-    for (; i < alignedlength; i+=32)
+    Rpp32f exposure_mul = pow(2,exposureFactor);
+    Rpp32f pixel;
+#pragma omp parallel for
+    for(int j = 0; j < THREADS; ++j)
     {
-        px0 =  _mm256_loadu_si256((__m256i *)srcPtrTemp); // todo: check if we can use _mm_load_si128 instead (aligned)
-        px1 = _mm256_unpackhi_epi8(px0, zero);    // pixels 16-31
-        px0 = _mm256_unpacklo_epi8(px0, zero);    // pixels 0-15
-        p2 = _mm256_cvtepi32_ps(_mm256_unpackhi_epi16(px0, zero));   // pixels 8-15
-        p0 = _mm256_cvtepi32_ps(_mm256_unpacklo_epi16(px0, zero));  // pixels 0-7
-        p3 = _mm256_cvtepi32_ps(_mm256_unpackhi_epi16(px1, zero));   // pixels 24-31
-        p1 = _mm256_cvtepi32_ps(_mm256_unpacklo_epi16(px1, zero));  // pixels 16-23
-        px0 = _mm256_cvtps_epi32(_mm256_mul_ps(p0, pMul1));
-        px2 = _mm256_cvtps_epi32(_mm256_mul_ps(p2, pMul1));
-        px1 = _mm256_cvtps_epi32(_mm256_mul_ps(p1, pMul1));
-        px3 = _mm256_cvtps_epi32(_mm256_mul_ps(p3, pMul1));
-        px0 = _mm256_packus_epi32(px0, px2);
-        px1 = _mm256_packus_epi32(px1, px3);
-        px0 = _mm256_packus_epi16(px0, px1);       // pix 0-31
-        _mm256_storeu_si256((__m256i *)dstPtr, px0);      // todo: check if we can use _mm_store_si128 instead (aligned)
-        srcPtrTemp +=32, dstPtr +=32;
+        Rpp8u *srcPtrTemp, *dstPtrTemp;
+        srcPtrTemp = srcPtr + j*(alignedlength/THREADS);
+        dstPtrTemp = dstPtr + j*(alignedlength/THREADS);
+        __m256 pMul1 = _mm256_set1_ps(exposure_mul);
+        __m256i const zero = _mm256_setzero_si256();
+        __m256i px0, px1, px2, px3;
+        __m256 p0, p1, p2, p3;
+        for (int i = 0; i < alignedlength/THREADS; i+=32)
+        {
+            px0 =  _mm256_loadu_si256((__m256i *)srcPtrTemp); // todo: check if we can use _mm_load_si128 instead (aligned)
+            px1 = _mm256_unpackhi_epi8(px0, zero);    // pixels 16-31
+            px0 = _mm256_unpacklo_epi8(px0, zero);    // pixels 0-15
+            p2 = _mm256_cvtepi32_ps(_mm256_unpackhi_epi16(px0, zero));   // pixels 8-15
+            p0 = _mm256_cvtepi32_ps(_mm256_unpacklo_epi16(px0, zero));  // pixels 0-7
+            p3 = _mm256_cvtepi32_ps(_mm256_unpackhi_epi16(px1, zero));   // pixels 24-31
+            p1 = _mm256_cvtepi32_ps(_mm256_unpacklo_epi16(px1, zero));  // pixels 16-23
+            px0 = _mm256_cvtps_epi32(_mm256_mul_ps(p0, pMul1));
+            px2 = _mm256_cvtps_epi32(_mm256_mul_ps(p2, pMul1));
+            px1 = _mm256_cvtps_epi32(_mm256_mul_ps(p1, pMul1));
+            px3 = _mm256_cvtps_epi32(_mm256_mul_ps(p3, pMul1));
+            px0 = _mm256_packus_epi32(px0, px2);
+            px1 = _mm256_packus_epi32(px1, px3);
+            px0 = _mm256_packus_epi16(px0, px1);       // pix 0-31
+            _mm256_storeu_si256((__m256i *)dstPtrTemp, px0);      // todo: check if we can use _mm_store_si128 instead (aligned)
+            srcPtrTemp +=32, dstPtrTemp +=32;
+        }
     }
-    for (; i < length; i++) {
-        pixel = ((Rpp32f) (srcPtrTemp[i])) * exposure_mul;
-        dstPtrTemp[i] = (Rpp8u)RPPPIXELCHECK(pixel);
+
+    for (int i = alignedlength*32; i < length; i++) {
+        pixel = ((Rpp32f) (srcPtr[i])) * exposure_mul;
+        dstPtr[i] = (Rpp8u)RPPPIXELCHECK(pixel);
     }
 
 #else
     for (int i = 0; i < (channel * srcSize.height * srcSize.width); i++)
     {
-        pixel = ((Rpp32f) (srcPtrTemp[i])) * exposure_mul;
-        dstPtrTemp[i] = (Rpp8u)RPPPIXELCHECK(pixel);
+        pixel = ((Rpp32f) (srcPtr[i])) * exposure_mul;
+        dstPtr[i] = (Rpp8u)RPPPIXELCHECK(pixel);
     }
 #endif
     return RPP_SUCCESS;
