@@ -274,7 +274,7 @@ RppStatus brightness_host(Rpp8u* srcPtr, RppiSize srcSize, Rpp8u* dstPtr,
             srcPtrTemp +=16, dstPtrTemp +=16;
         }
     }
-    for (int i =  alignedlength*32; i < length; i++) {
+    for (int i =  alignedlength*16; i < length; i++) {
         Rpp32f pixel = ((Rpp32f) (srcPtr[i])) * alpha + beta;
         pixel = RPPPIXELCHECK(pixel);
         dstPtr[i] = (Rpp8u) round(pixel);
