@@ -14,6 +14,7 @@ RPP is developed for __Linux__ operating system.
 1. Ubuntu `16.04`/`18.04`
 2. [ROCm supported hardware](https://rocm.github.io/hardware.html)
 3. [ROCm](https://github.com/RadeonOpenCompute/ROCm#installing-from-amd-rocm-repositories)
+3. [AOCC](https://developer.amd.com/amd-aocc)
 
 ## Functions Included
 * Brightness
