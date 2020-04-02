@@ -1,7 +1,7 @@
 #ifndef RPP_H
 #define RPP_H
 
-#include <rpp/export.h>
+#include <export.h>
 
 #if RPP_BACKEND_OPENCL
 #if defined(__APPLE__) || defined(__MACOSX)
